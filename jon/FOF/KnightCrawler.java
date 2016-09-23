@@ -82,7 +82,7 @@ public class KnightCrawler extends TeamRobot {
     }
 
     private void findDirection() {
-        
+
     }
 
     public void checkWalls() {

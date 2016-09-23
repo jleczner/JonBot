@@ -7,6 +7,9 @@ release.properties
 dependency-reduced-pom.xml
 buildNumber.properties
 .mvn/timing.properties
+<<<<<<< HEAD
 
 *.DS_Store
 *.class
+=======
+>>>>>>> 76e8233d22325293ff79f500c72b304841228ebe
