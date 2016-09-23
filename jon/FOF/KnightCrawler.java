@@ -13,7 +13,9 @@ import java.util.Map;
  * Created by jonathanleczner on 9/23/16.
  */
 public class KnightCrawler extends TeamRobot {
-    final Map<String, RobotData> enemyMap;
+    final Map<String, RobotData> enemyMap = new LinkedHashMap<String, RobotData>(2, 5, true);
+
+    RobotData target;
 
     private boolean peek; // Don't turn if there's a robot there
     private int direction = 1; // pos - forward, neg - back
@@ -21,23 +23,15 @@ public class KnightCrawler extends TeamRobot {
     private boolean horizontal = false;
     private boolean vertical = false;
     private double wallBuffer; // padding for movement
-    private long lastDirectionShift;
+    private int tooCloseToWall = 0;
 
-    private int scanDir = 1; // pos - right, neg - left
-
-    RobotData oldestScanned;
-    RobotData target;
-
-    public KnightCrawler() {
-        enemyMap = new LinkedHashMap<String, RobotData>(5, 2, true);
-    }
+    private double scanDir = 1; // pos - right, neg - left
 
     /**
      * run: Move around the walls
      */
     public void run() {
         init();
-
         while (true) {
             handleRadar();
             doMovement();
@@ -50,10 +44,7 @@ public class KnightCrawler extends TeamRobot {
         // Set colors
         Color midnight = new Color(25, 25, 112);
         Color neonGreen = new Color(57, 255, 20);
-        setBodyColor(midnight);
-        setGunColor(midnight);
-        setRadarColor(midnight);
-        setScanColor(Color.GREEN);
+        setAllColors(midnight);
         setBulletColor(neonGreen);
 
         setAdjustRadarForGunTurn(true);
@@ -62,6 +53,7 @@ public class KnightCrawler extends TeamRobot {
         wallBuffer = this.getWidth(); // to keep from hitting walls
         // Initialize moveAmount to the maximum possible for this battlefield.
         moveAmount = Math.max(getBattleFieldWidth() - wallBuffer, getBattleFieldHeight() - wallBuffer);
+        checkWalls();
     }
 
     private void handleRadar() {
@@ -78,75 +70,47 @@ public class KnightCrawler extends TeamRobot {
     }
 
     private void doMovement() {
-        boolean horizontal = false;
-        boolean vertical = false;
+        peek = true;
+        if (tooCloseToWall > 0) {
+            tooCloseToWall--;
+        }
+        if (getVelocity() == 0) {
+            findDirection();
+            setAhead(moveAmount * direction);
+        }
+        peek = false;
+    }
 
-        int newDirection = direction;
-        double newHeading = getHeadingRadians();
+    private void findDirection() {
+        
+    }
 
-        if (target != null) {
-            // Check if our robot is at the upper or lower border and hence should move horizontally
-            if (getY() < wallBuffer || getY() > getBattleFieldHeight() - wallBuffer) {
-                horizontal = true;
+    public void checkWalls() {
+        this.addCustomEvent(new Condition("walls") {
+            public boolean test() {
+                return (
+                        // we're too close to the left wall
+                        (getX() <= wallBuffer ||
+                                // or we're too close to the right wall
+                                getX() >= getBattleFieldWidth() - wallBuffer ||
+                                // or we're too close to the bottom wall
+                                getY() <= wallBuffer ||
+                                // or we're too close to the top wall
+                                getY() >= getBattleFieldHeight() - wallBuffer)
+                );
             }
-            // Check if our robot is at the left or right border and hence should move vertically
-            if (getX() < wallBuffer || getX() > getBattleFieldWidth() - wallBuffer) {
-                vertical = true;
-            }
-            // If we are in one of the corners of the battlefield, we could move both horizontally
-            // or vertically.
-            // In this situation, we need to choose one of the two directions.
-            if (horizontal && vertical) {
-                // If the horizontal distance to our target is lesser than the vertical distance,
-                // then we choose to move vertically, and hence we clear the horizontal flag.
-                if (Math.abs(target.targetX - getX()) <= Math.abs(target.targetY - getY())) {
-                    horizontal = false; // Do not move horizontally => move vertically
-                }
-            }
-            // Adjust the heading of our robot with 90 degrees, if it must move horizontally.
-            // Otherwise the calculated heading is towards moving vertically.
-            if (horizontal) {
-                newHeading -= Math.PI / 2;
-            }
-            // Set the robot to turn left the amount of radians we have just calculated
-            setTurnLeftRadians(Utils.normalRelativeAngle(newHeading));
+        });
+    }
 
-            // Check if our robot has finished turning, i.e. has less than 1 degrees left to turn
-            if (Math.abs(getTurnRemaining()) < 1 || Math.abs(getVelocity()) < 0.01) {
-                // If we should move horizontally, the set the robot to move ahead with the
-                // horizontal distance to the target robot. Otherwise, use the vertical distance.
-                double delta; // delta is the delta distance to move
-                if (horizontal) {
-                    delta = target.targetX - getX();
-                } else {
-                    delta = target.targetY - getY();
-                }
-                setAhead(delta);
-
-                // Set the new direction of our robot to 1 (meaning move forward) if the delta
-                // distance is positive; otherwise it is set to -1 (meaning move backward).
-                newDirection = delta > 0 ? 1 : -1;
-
-                // Check if more than 10 turns have past since we changed the direction the last
-                // time
-                if (getTime() - lastDirectionShift > 10) {
-                    // If so, set the new direction to be the reverse direction if the velocity < 1
-                    if (Math.abs(getVelocity()) < 1) {
-                        newDirection = direction * -1;
-                    }
-                    // Check if the direction really changed
-                    if (newDirection != direction) {
-                        // If the new direction != current direction, then set the current direction
-                        // to be the new direction and save the current time so we know when we
-                        // changed the direction the last time.
-                        direction = newDirection;
-                        lastDirectionShift = getTime();
-                    }
-                }
+    @Override
+    public void onCustomEvent(CustomEvent e) {
+        if (e.getCondition().getName().equals("walls"))
+        {
+            if (tooCloseToWall <= 0) {
+                tooCloseToWall += wallBuffer;
+                setMaxVelocity(0);
             }
         }
-        // Set ahead 100 units forward or backward depending on the direction
-        setAhead(100 * direction);
     }
 
     @Override
@@ -162,19 +126,19 @@ public class KnightCrawler extends TeamRobot {
 
     @Override
     public void onHitWall(HitWallEvent e) {
-        System.out.println("hit wall, turning right");
         turnRight(e.getBearing() + 90);
     }
 
     @Override
     public void onScannedRobot(ScannedRobotEvent e) {
-//        letEmHaveIt(e);
-        // Note that scan is called automatically when the robot is moving.
-        // By calling it manually here, we make sure we generate another scan event if there's a robot on the next
-        // wall, so that we do not start moving up it until it's gone.
-        if (peek) {
-            scan();
-        }
+        // Update the enemy map
+        updateEnemyMap(e);
+
+        // Update the scan direction
+        updateScanDirection(e);
+
+        // Update enemy target positions
+        updateEnemyTargetPositions();
     }
 
     @Override
@@ -185,10 +149,6 @@ public class KnightCrawler extends TeamRobot {
         // Remove the robot data for the robot that died from the enemy map
         enemyMap.remove(deadRobotName);
 
-        // Remove the data entry for the oldest scanned robot, if we have such an entry
-        if (oldestScanned != null && oldestScanned.name.equals(deadRobotName)) {
-            oldestScanned = null;
-        }
         if (target != null && target.name.equals(deadRobotName)) {
             target = null;
         }
@@ -317,6 +277,126 @@ public class KnightCrawler extends TeamRobot {
     }
 
     /**
+     * Method the updates the enemy map based on new scan data for a scanned robot.
+     *
+     * @param scannedRobotEvent
+     *            is a ScannedRobotEvent event containing data about a scanned robot.
+     */
+    private void updateEnemyMap(ScannedRobotEvent scannedRobotEvent) {
+        // Gets the name of the scanned robot
+        final String scannedRobotName = scannedRobotEvent.getName();
+
+        // Get robot data for the scanned robot, if we have an entry in the enemy map
+        RobotData scannedRobot = enemyMap.get(scannedRobotName);
+
+        // Check if data entry exists for the scanned robot
+        if (scannedRobot == null) {
+            // No data entry exists => Create a new data entry for the scanned robot
+            scannedRobot = new RobotData(scannedRobotEvent);
+            // Put the new data entry into the enemy map
+            enemyMap.put(scannedRobotName, scannedRobot);
+        } else {
+            // Data entry exists => Update the current entry with new scanned data
+            scannedRobot.update(scannedRobotEvent);
+        }
+    }
+
+    /**
+     * Method that updates the direction of the radar based on new scan data for a scanned robot.
+     *
+     * @param scannedRobotEvent
+     *            is a ScannedRobotEvent event containing data about a scanned robot.
+     */
+    private void updateScanDirection(ScannedRobotEvent scannedRobotEvent) {
+        // Gets the name of the scanned robot
+        final String scannedRobotName = scannedRobotEvent.getName();
+
+        // map contains scanned data entries for ALL robots (the size of the enemy map is equal to
+        // the number of opponent robots found by calling the getOthers() method).
+        if (enemyMap.size() == getOthers()) {
+
+            // Get the oldest scanned robot data from our LinkedHashMap, where the first value
+            // contains the oldest accessed entry, which is the robot we need to get.
+            RobotData oldestScannedRobot = enemyMap.values().iterator().next();
+
+            // Get the recent scanned position (x,y) of the oldest scanned robot
+            double x = oldestScannedRobot.scannedX;
+            double y = oldestScannedRobot.scannedY;
+
+            // Get the heading of our robot
+            double ourHeading = getRadarHeadingRadians();
+
+            // Calculate the bearing to the oldest scanned robot.
+            // The bearing is the delta angle between the heading of our robot and the other robot,
+            // which can be a positive or negative angle.
+            double bearing = bearingTo(ourHeading, x, y);
+
+            // Update the scan direction based on the bearing.
+            // If the bearing is positive, the radar will be moved to the right.
+            // If the bearing is negative, the radar will be moved to the left.
+            scanDir = bearing;
+        }
+    }
+
+    /**
+     * Updates the target positions for all enemies. The target position is the position our robot
+     * must fire at in order to hit the target robot. This robot uses Linear Targeting (Exact
+     * Non-iterative Solution) as described on the RoboWiki here:
+     * http://robowiki.net/wiki/Linear_Targeting
+     */
+    private void updateEnemyTargetPositions() {
+        // Go thru all robots in the enemy map
+        for (RobotData enemy : enemyMap.values()) {
+
+            // Variables prefixed with e- refer to enemy and b- refer to bullet
+            double bV = Rules.getBulletSpeed(3);
+            double eX = enemy.scannedX;
+            double eY = enemy.scannedY;
+            double eV = enemy.scannedVelocity;
+            double eH = enemy.scannedHeading;
+
+            // These constants make calculating the quadratic coefficients below easier
+            double A = (eX - getX()) / bV;
+            double B = (eY - getY()) / bV;
+            double C = eV / bV * Math.sin(eH);
+            double D = eV / bV * Math.cos(eH);
+
+            // Quadratic coefficients: a*(1/t)^2 + b*(1/t) + c = 0
+            double a = A * A + B * B;
+            double b = 2 * (A * C + B * D);
+            double c = (C * C + D * D - 1);
+
+            // If the discriminant of the quadratic formula is >= 0, we have a solution meaning that
+            // at some time, t, the bullet will hit the enemy robot if we fire at it now.
+            double discrim = b * b - 4 * a * c;
+            if (discrim >= 0) {
+                // Reciprocal of quadratic formula. Calculate the two possible solution for the
+                // time, t
+                double t1 = 2 * a / (-b - Math.sqrt(discrim));
+                double t2 = 2 * a / (-b + Math.sqrt(discrim));
+
+                // Choose the minimum positive time or select the one closest to 0, if the time is
+                // negative
+                double t = Math.min(t1, t2) >= 0 ? Math.min(t1, t2) : Math.max(t1, t2);
+
+                // Calculate the target position (x,y) for the enemy. That is the point that our gun
+                // should point at in order to hit the enemy at the time, t.
+                double targetX = eX + eV * t * Math.sin(eH);
+                double targetY = eY + eV * t * Math.cos(eH);
+
+                // Assume enemy stops at walls. Hence, we limit that target position at the walls.
+                double minX = wallBuffer;
+                double minY = wallBuffer;
+                double maxX = getBattleFieldWidth() - wallBuffer;
+                double maxY = getBattleFieldHeight() - wallBuffer;
+
+                enemy.targetX = limit(targetX, minX, maxX);
+                enemy.targetY = limit(targetY, minY, maxY);
+            }
+        }
+    }
+
+    /**
      * Find closest for now, maybe weakest later
      */
     private void updateTarget() {
@@ -370,7 +450,7 @@ public class KnightCrawler extends TeamRobot {
             // angle
             if (Math.abs(getGunTurnRemaining()) < angle) {
                 // If so, our gun should be pointing at our target so we can hit it => fire!!
-                setFire(3);
+//                setFire(3);
             }
         }
     }
